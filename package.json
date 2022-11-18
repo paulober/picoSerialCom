@@ -1,0 +1,31 @@
+{
+  "private": true,
+  "name": "picoserialcom",
+  "version": "0.0.1",
+  "description": "A comunication abstraction layer for @serialport communication with Raspberry Pi Pico (W) MicroPython REPLs.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "compile": "tsc --project .",
+    "compile-tests": "tsc --project . --outDir out",
+    "pretest": "npm run compile-tests && npm run lint",
+    "lint": "eslint lib --ext ts",
+    "test": "npm run compile-tests && LOG_LEVEL=debug node out/test/serialport.test.js",
+    "clean": "pwsh -c \"rm -R out && rm -R dist\"",
+    "mocha-test": "mocha --no-package --config ./.mocharc.json"
+  },
+  "author": "paulober",
+  "license": "Apache-2.0",
+  "minimumNodeVersion": 16,
+  "devDependencies": {
+    "@types/node": "^16.14.2",
+    "@types/serialport": "^8.0.2",
+    "@typescript-eslint/eslint-plugin": "^5.43.0",
+    "@typescript-eslint/parser": "^5.43.0",
+    "eslint": "^8.27.0",
+    "typescript": "^4.9.3"
+  },
+  "dependencies": {
+    "serialport": "^10.5.0"
+  }
+}
