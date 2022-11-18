@@ -239,7 +239,7 @@ export class PicoSerialCom {
    *
    * @throws Throws an error if the connection could not be closed.
    */
-  public disconnect() {
+  public disconnect(): void {
     this.stream?.close((err) => {
       if (err !== null) {
         lwarn("Could not close serial port connection")
