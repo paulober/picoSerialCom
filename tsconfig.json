@@ -14,11 +14,8 @@
 		/* Import aliases */
 		"baseUrl": "./lib",
 		/*"paths": {
-			"~": [
-				"./*"
-			],
-			"@lib": [
-				"./*"
+			"@pscLib/*": [
+				"*"
 			]
 		},*/
 
@@ -29,5 +26,13 @@
 		"forceConsistentCasingInFileNames": true,
 		// not set and maybe cause porblems with the esModuleInterop set to true in parent projects tsconfig
 		// "esModuleInterop": true
-	}
+	},
+	"exclude": [
+		"node_modules",
+		"./out",
+		"./dist"
+	],
+	"include": [
+		"lib/**/*.ts"
+	]
 }

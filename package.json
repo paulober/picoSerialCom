@@ -7,11 +7,10 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "compile": "tsc --project .",
-    "compile-tests": "tsc --project . --outDir out",
-    "pretest": "npm run compile-tests && npm run lint",
+    "pretest": "npm run compile && npm run lint",
     "lint": "eslint lib --ext ts",
-    "test": "npm run compile-tests && LOG_LEVEL=debug node out/test/serialport.test.js",
-    "clean": "pwsh -c \"rm -R out && rm -R dist\"",
+    "test": "pwsh -c '$env:LOG_LEVEL=\"debug\"' && node ./dist/test/serialport.test.js",
+    "clean": "pwsh -c \"rm -R dist\"",
     "mocha-test": "mocha --no-package --config ./.mocharc.json"
   },
   "author": "paulober",
@@ -26,6 +25,7 @@
     "typescript": "^4.9.3"
   },
   "dependencies": {
+    "async-mutex": "^0.4.0",
     "serialport": "^10.5.0"
   }
 }

@@ -1,4 +1,4 @@
-import { SerialPort } from "serialport"
+import { DelimiterParser, SerialPort } from "serialport"
 import { ldbg, lerr, lwarn } from "./logger"
 //import * as util from "util"
 
@@ -47,7 +47,7 @@ export class PicoSerialCom {
 
   /* Runtime properties */
   private isErrorThrown: boolean = false
-  private streamOpen?: () => Promise<void>
+  private onMessage: (message: Buffer) => void
 
   /**
    * A serialport client wrapper for communicating with the MicroPython REPL on
@@ -57,9 +57,14 @@ export class PicoSerialCom {
    * function will not be used to calculate the port address.
    * @param {Array<string>} manufacturers Will overwrite default manufacturers list.
    */
-  constructor(manualComAddress?: string, manufacturers?: string[]) {
+  constructor(
+    cbOnMessage: (message: Buffer) => void,
+    manualComAddress?: string,
+    manufacturers?: string[]
+  ) {
     this.manualComAddress = manualComAddress || ""
     this.manufacturers = manufacturers || DEFAULT_MANUFACTURERS
+    this.onMessage = cbOnMessage
   }
 
   /**
@@ -182,7 +187,10 @@ export class PicoSerialCom {
    * @throws Throws an error if the connection could not be opened or no
    * suitable serial port could be found.
    */
-  public async connect(): Promise<void> {
+  public async connect(
+    cbOnTimeout: (err: Error) => void,
+    cbOnConnect: () => void
+  ): Promise<void> {
     // return if stream is already open
     if (this.stream?.isOpen) {
       return
@@ -215,6 +223,14 @@ export class PicoSerialCom {
 
     ldbg("Trying to connect to serial port " + address)
 
+    let timeout = setTimeout(async () => {
+      if (!this.isErrorThrown) {
+        this.isErrorThrown = true
+        cbOnTimeout(new Error("Timeout while connecting"))
+        this.disconnect()
+      }
+    }, 2000)
+
     /* Attach listeners */
     this.stream.on("error", (err) => {
       lerr("Serial port stream error: " + err.message)
@@ -224,6 +240,16 @@ export class PicoSerialCom {
       }
     })
 
+    // TODO: maybe use this.stream?.unpipe() if not in normal repl mode
+    this.stream.pipe(
+      new DelimiterParser({
+        delimiter: ">>>",
+        includeDelimiter: false,
+      })
+    )
+
+    this.stream.on("data", this.onData)
+
     /* Configure stream */
     this.stream.open((err) => {
       if (err !== null) {
@@ -231,7 +257,53 @@ export class PicoSerialCom {
       }
     })
 
+    this.sendPing()
+    clearTimeout(timeout)
+    this.send("\r\n")
+
     ldbg("Serial port connection established")
+    cbOnConnect()
+  }
+
+  public send(message: string): void {
+    if (this.stream?.isOpen) {
+      let data = Buffer.from(message, "binary")
+      if (
+        !this.stream.write(data, (err) => {
+          if (err !== undefined && err !== null) {
+            lerr("Error while writing to serial port: " + err.message)
+          }
+        })
+      ) {
+        // TODO: maybe cause problems with some control
+        // commands like machine.reset() which will reastart the target
+        this.stream?.drain()
+      }
+    }
+  }
+
+  public sendPing(): void {
+    if (process.platform === "win32") {
+      // avoid MCU waiting in bootloader on hardware restart by setting both dtr and rts high
+      this.stream?.set({
+        rts: true,
+      })
+    }
+
+    if (process.platform === "darwin") {
+      let err = this.stream?.set({
+        dtr: true,
+      })
+      if (err) {
+        throw err
+      }
+    }
+  }
+
+  public onData(data: Buffer): void {
+    const msg = data.toString("utf8")
+    ldbg("Received data from serial port: " + msg)
+    this.onMessage(data)
   }
 
   /**
@@ -240,10 +312,18 @@ export class PicoSerialCom {
    * @throws Throws an error if the connection could not be closed.
    */
   public disconnect(): void {
-    this.stream?.close((err) => {
-      if (err !== null) {
-        lwarn("Could not close serial port connection")
-      }
-    })
+    if (this.stream?.isOpen) {
+      this.stream.close((err) => {
+        if (err !== null) {
+          lwarn("Could not close serial port connection")
+        }
+      })
+    }
+  }
+
+  public flush(): void {
+    if (this.stream?.isOpen) {
+      this.stream.flush()
+    }
   }
 }
