@@ -8,7 +8,7 @@
   "scripts": {
     "compile": "tsc --project .",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint lib --ext ts",
+    "lint": "eslint src --ext ts",
     "test": "pwsh -c '$env:LOG_LEVEL=\"debug\"' && node ./dist/test/serialport.test.js",
     "clean": "pwsh -c \"rm -R dist\"",
     "mocha-test": "mocha --no-package --config ./.mocharc.json"

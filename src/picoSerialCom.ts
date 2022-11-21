@@ -2,6 +2,13 @@ import { DelimiterParser, SerialPort } from "serialport"
 import { ldbg, lerr, lwarn } from "./logger"
 //import * as util from "util"
 
+const CTRL_A = "\x01" // raw repl
+const CTRL_B = "\x02" // exit raw repl
+const CTRL_C = "\x03" // ctrl-c
+const CTRL_D = "\x04" // reset (ctrl-d) / exit paste mode
+const CTRL_E = "\x05" // paste mode (ctrl-e)
+const CTRL_F = "\x06" // safe boot (ctrl-f)
+
 /**
  * Default frequent Pico (w) board serial port manufacturer values.
  */
@@ -20,19 +27,19 @@ export class PicoSerialCom {
    * List of autoconnect manufacturers. When autoconnecting, only ports with a manufacturer
    * in this list will be considered with priority form 0 as first and the up.
    *
-   * @type {Array<string>}
+   * @type {string[]}
    * @default ["MicroPython", "Microsoft"]
    */
   private manufacturers: string[]
   /**
    * @readonly Currently, overwriting the vendorIds is not supported.
-   * @type {Array<string>}
+   * @type {string[]}
    * @default
    */
   private readonly vendorIds: string[] = ["2E8A"]
   /**
    * @readonly Currently, overwriting the productIds is not supported.
-   * @type {Array<string>}
+   * @type {string[]}
    * @default
    */
   private readonly productIds: string[] = ["0005"]
@@ -48,6 +55,7 @@ export class PicoSerialCom {
   /* Runtime properties */
   private isErrorThrown: boolean = false
   private onMessage: (message: Buffer) => void
+  private safeBootOnConnect: boolean
 
   /**
    * A serialport client wrapper for communicating with the MicroPython REPL on
@@ -55,16 +63,18 @@ export class PicoSerialCom {
    *
    * @param {string} manualComAddress A manual serial port address. If set, the `autoConnect()`
    * function will not be used to calculate the port address.
-   * @param {Array<string>} manufacturers Will overwrite default manufacturers list.
+   * @param {string[]} manufacturers Will overwrite default manufacturers list.
    */
   constructor(
     cbOnMessage: (message: Buffer) => void,
     manualComAddress?: string,
-    manufacturers?: string[]
+    manufacturers?: string[],
+    softResetOnConnect?: boolean
   ) {
     this.manualComAddress = manualComAddress || ""
     this.manufacturers = manufacturers || DEFAULT_MANUFACTURERS
     this.onMessage = cbOnMessage
+    this.safeBootOnConnect = softResetOnConnect || false
   }
 
   /**
@@ -234,21 +244,21 @@ export class PicoSerialCom {
     /* Attach listeners */
     this.stream.on("error", (err) => {
       lerr("Serial port stream error: " + err.message)
-      if (!this.isErrorThrown) {
+      if (err !== undefined && err !== null && !this.isErrorThrown) {
         this.isErrorThrown = true // Prevents multiple error messages
         throw err
       }
     })
 
     // TODO: maybe use this.stream?.unpipe() if not in normal repl mode
-    this.stream.pipe(
+    /*this.stream.pipe(
       new DelimiterParser({
-        delimiter: ">>>",
+        delimiter: Buffer.from("\r\n>>> "),
         includeDelimiter: false,
       })
-    )
+    )*/
 
-    this.stream.on("data", this.onData)
+    this.stream.on("data", (message: Buffer) => this.onData(message))
 
     /* Configure stream */
     this.stream.open((err) => {
@@ -256,13 +266,21 @@ export class PicoSerialCom {
         throw new Error("Could not open serial port connection")
       }
     })
+    this.stream.prependOnceListener("open", () => {
+      this.sendPing()
+      clearTimeout(timeout)
 
-    this.sendPing()
-    clearTimeout(timeout)
-    this.send("\r\n")
+      if (this.safeBootOnConnect) {
+        // double CTRL_C to exit every program, CTRL_B to enter normal repl
+        this.send("\r" + CTRL_C + CTRL_C + CTRL_B)
+      } else {
+        // to get repl promt back
+        this.send("\r\n")
+      }
 
-    ldbg("Serial port connection established")
-    cbOnConnect()
+      ldbg("Serial port connection established")
+      cbOnConnect()
+    })
   }
 
   public send(message: string): void {
@@ -283,6 +301,10 @@ export class PicoSerialCom {
   }
 
   public sendPing(): void {
+    if (this.stream !== undefined && !this.stream.isOpen) {
+      return
+    }
+
     if (process.platform === "win32") {
       // avoid MCU waiting in bootloader on hardware restart by setting both dtr and rts high
       this.stream?.set({
@@ -291,12 +313,9 @@ export class PicoSerialCom {
     }
 
     if (process.platform === "darwin") {
-      let err = this.stream?.set({
+      this.stream?.set({
         dtr: true,
       })
-      if (err) {
-        throw err
-      }
     }
   }
 

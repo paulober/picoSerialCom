@@ -30,8 +30,8 @@
         "no-fallthrough": "warn",
         "newline-before-return": "warn",
         "no-return-await": "warn",
-        "arrow-body-style": ["error", "as-needed"],
-        "no-restricted-imports": ["error", { "patterns": ["../"]}]
+        "arrow-body-style": ["error", "as-needed"]
+        //"no-restricted-imports": ["error", { "patterns": ["../"]}]
     },
     "ignorePatterns": [
         "out",

@@ -8,11 +8,12 @@
 		"sourceMap": true,
 		"declaration": true,
 		"allowJs": false,
-		"rootDir": "lib",
+		"rootDir": "src",
 		"outDir": "dist",
 		"strict": true,   /* enable all strict type-checking options */
 		/* Import aliases */
-		"baseUrl": "./lib",
+		// baseUrl for relative imports does not work
+		//"baseUrl": "src",
 		/*"paths": {
 			"@pscLib/*": [
 				"*"
@@ -33,6 +34,6 @@
 		"./dist"
 	],
 	"include": [
-		"lib/**/*.ts"
+		"src/**/*.ts"
 	]
 }

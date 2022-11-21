@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { PicoSerialCom } from "index"
+import { PicoSerialCom } from "../index"
 
 /* Custom designed test structure to test functionality not to find bugs like unit tests */
 
@@ -28,9 +28,14 @@ const pl = (msg: string, color: number): void =>
 
 // test
 const doTest = async function (): Promise<void> {
-  const picoSerialCom = new PicoSerialCom((message: Buffer) => {
-    console.log(message.toString("utf-8"))
-  })
+  const picoSerialCom = new PicoSerialCom(
+    (message: Buffer) => {
+      console.log(message.toString("utf-8"))
+    },
+    undefined,
+    undefined,
+    true
+  )
   await picoSerialCom.connect(
     (err: Error) => {
       pl("Timeout", BG_RED)
