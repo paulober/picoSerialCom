@@ -1,13 +1,9 @@
-import { DelimiterParser, SerialPort } from "serialport"
+import { Mutex } from "async-mutex"
+import { SerialPort } from "serialport"
+import { CTRL_B, CTRL_C } from "./commands"
 import { ldbg, lerr, lwarn } from "./logger"
+import type { PortInfo } from "@serialport/bindings-cpp"
 //import * as util from "util"
-
-const CTRL_A = "\x01" // raw repl
-const CTRL_B = "\x02" // exit raw repl
-const CTRL_C = "\x03" // ctrl-c
-const CTRL_D = "\x04" // reset (ctrl-d) / exit paste mode
-const CTRL_E = "\x05" // paste mode (ctrl-e)
-const CTRL_F = "\x06" // safe boot (ctrl-f)
 
 /**
  * Default frequent Pico (w) board serial port manufacturer values.
@@ -38,11 +34,16 @@ export class PicoSerialCom {
    */
   private readonly vendorIds: string[] = ["2E8A"]
   /**
+   * Contains list of supported productIds. More can be found here:
+   * https://github.com/raspberrypi/usb-pid
+   *
    * @readonly Currently, overwriting the productIds is not supported.
    * @type {string[]}
    * @default
    */
-  private readonly productIds: string[] = ["0005"]
+  public static readonly productIds: string[] = [
+    "0005", // Raspberry Pi Pico MicroPython firmware (CDC)
+  ]
   /**
    * Connects to the specified serial port on `connect()`.
    * If no manualComAddress is set, the autoConnect() function will be used.
@@ -55,7 +56,8 @@ export class PicoSerialCom {
   /* Runtime properties */
   private isErrorThrown: boolean = false
   private onMessage: (message: Buffer) => void
-  private safeBootOnConnect: boolean
+  private ctrlCOnConnect: boolean
+  private mutex: Mutex = new Mutex()
 
   /**
    * A serialport client wrapper for communicating with the MicroPython REPL on
@@ -67,14 +69,32 @@ export class PicoSerialCom {
    */
   constructor(
     cbOnMessage: (message: Buffer) => void,
+    ctrlCOnConnect?: boolean,
     manualComAddress?: string,
-    manufacturers?: string[],
-    softResetOnConnect?: boolean
+    manufacturers?: string[]
   ) {
     this.manualComAddress = manualComAddress || ""
     this.manufacturers = manufacturers || DEFAULT_MANUFACTURERS
     this.onMessage = cbOnMessage
-    this.safeBootOnConnect = softResetOnConnect || false
+    this.ctrlCOnConnect = ctrlCOnConnect || true
+  }
+
+  /**
+   *  Find all serial ports with a Pico attatched.
+   *
+   * @returns A list of all connected serial ports with a Pico attatched.
+   */
+  public static async findConnectedPicos(): Promise<PortInfo[]> {
+    const ports = await SerialPort.list()
+
+    //search ports by productIds
+    const picos = ports.filter((port) =>
+      port.productId !== undefined
+        ? PicoSerialCom.productIds.includes(port.productId)
+        : false
+    )
+
+    return picos
   }
 
   /**
@@ -86,14 +106,7 @@ export class PicoSerialCom {
    * @returns The path to the serial port.
    */
   private async autoConnect(): Promise<string | undefined> {
-    const ports = await SerialPort.list()
-
-    //search ports by productIds
-    const productPorts = ports.filter((port) =>
-      port.productId !== undefined
-        ? this.productIds.includes(port.productId)
-        : false
-    )
+    const productPorts = await PicoSerialCom.findConnectedPicos()
 
     if (productPorts.length > 0) {
       if (productPorts.length > 1) {
@@ -132,6 +145,9 @@ export class PicoSerialCom {
       }
     }
 
+    // search for other ports which may be suitable
+    const ports = await SerialPort.list()
+
     //search ports by vendorIds
     const vendorPorts = ports.filter((port) =>
       port.vendorId !== undefined
@@ -147,10 +163,11 @@ export class PicoSerialCom {
 
           if (
             port.productId !== undefined &&
-            this.productIds.includes(port.productId)
+            PicoSerialCom.productIds.includes(port.productId)
           ) {
             value +=
-              this.productIds.length - this.productIds.indexOf(port.productId)
+              PicoSerialCom.productIds.length -
+              PicoSerialCom.productIds.indexOf(port.productId)
           }
 
           if (
@@ -222,6 +239,11 @@ export class PicoSerialCom {
         autoOpen: false,
         // Path to the serial port. If not set, the autoConnect() function will be used.
         path: address,
+
+        // no flow control
+        rtscts: false,
+        xoff: false,
+        xon: false,
       },
       (err) => {
         if (err !== null) {
@@ -250,6 +272,7 @@ export class PicoSerialCom {
       }
     })
 
+    // Does not work
     // TODO: maybe use this.stream?.unpipe() if not in normal repl mode
     /*this.stream.pipe(
       new DelimiterParser({
@@ -267,53 +290,49 @@ export class PicoSerialCom {
       }
     })
     this.stream.prependOnceListener("open", () => {
-      this.sendPing()
+      this.setRTSandDTS()
       clearTimeout(timeout)
-
-      if (this.safeBootOnConnect) {
-        // double CTRL_C to exit every program, CTRL_B to enter normal repl
-        this.send("\r" + CTRL_C + CTRL_C + CTRL_B)
-      } else {
-        // to get repl promt back
-        this.send("\r\n")
-      }
-
       ldbg("Serial port connection established")
+
+      if (this.ctrlCOnConnect) {
+        // double CTRL_C to exit every program, CTRL_B to enter normal repl
+        this.send("\r" + CTRL_C + CTRL_C)
+      }
+      this.send("\r" + CTRL_B)
+
       cbOnConnect()
     })
   }
 
-  public send(message: string): void {
+  public async send(message: string): Promise<void> {
     if (this.stream?.isOpen) {
-      let data = Buffer.from(message, "binary")
-      if (
-        !this.stream.write(data, (err) => {
-          if (err !== undefined && err !== null) {
-            lerr("Error while writing to serial port: " + err.message)
-          }
-        })
-      ) {
-        // TODO: maybe cause problems with some control
-        // commands like machine.reset() which will reastart the target
-        this.stream?.drain()
-      }
+      await this.mutex.runExclusive(() => {
+        const data = Buffer.from(message, "binary")
+        if (
+          !this.stream?.write(data, (err) => {
+            if (err !== undefined && err !== null) {
+              lerr("Error while writing to serial port: " + err.message)
+            }
+          })
+        ) {
+          // TODO: maybe cause problems with some control
+          // commands like machine.reset() which will reastart the target
+          this.stream?.drain()
+        }
+      })
     }
   }
 
-  public sendPing(): void {
-    if (this.stream !== undefined && !this.stream.isOpen) {
+  public setRTSandDTS(): void {
+    if (this.stream === undefined || !this.stream.isOpen) {
       return
     }
 
+    // Windows does not set DTR or RTS by default
     if (process.platform === "win32") {
-      // avoid MCU waiting in bootloader on hardware restart by setting both dtr and rts high
+      // maybe avoid MCU waiting in bootloader on hardware restart by setting both dtr and rts high
       this.stream?.set({
-        rts: true,
-      })
-    }
-
-    if (process.platform === "darwin") {
-      this.stream?.set({
+        rts: false,
         dtr: true,
       })
     }
@@ -344,5 +363,9 @@ export class PicoSerialCom {
     if (this.stream?.isOpen) {
       this.stream.flush()
     }
+  }
+
+  public isOpen(): boolean {
+    return this.stream?.isOpen || false
   }
 }

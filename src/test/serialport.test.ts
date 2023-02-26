@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { PicoSerialCom } from "../index"
+import SPortClient from "./sportclient.test"
 
 /* Custom designed test structure to test functionality not to find bugs like unit tests */
 
@@ -28,14 +29,9 @@ const pl = (msg: string, color: number): void =>
 
 // test
 const doTest = async function (): Promise<void> {
-  const picoSerialCom = new PicoSerialCom(
-    (message: Buffer) => {
-      console.log(message.toString("utf-8"))
-    },
-    undefined,
-    undefined,
-    true
-  )
+  /*const picoSerialCom = new PicoSerialCom((message: Buffer) => {
+    console.log(message.toString("utf-8"))
+  }, true)
   await picoSerialCom.connect(
     (err: Error) => {
       pl("Timeout", BG_RED)
@@ -47,7 +43,10 @@ const doTest = async function (): Promise<void> {
 
   await delay(2 * 1000) // wait 2 seconds
 
-  picoSerialCom.disconnect()
+  picoSerialCom.disconnect()*/
+
+  const sPortClient = new SPortClient(true)
+  await sPortClient.start()
   pl("Disconnected", FG_CYAN)
 }
 
